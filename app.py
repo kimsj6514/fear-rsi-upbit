@@ -76,9 +76,12 @@ def prepare(df,fear):
     d['trend_ok']=d['close']>d['sma200']
     d['cross_up']=(d.rsi>=30)&(d.rsi.shift(1)<30)
     d['buy_signal']=d.cross_up & (d.fear<=35) & d.trend_ok
+    d['signal_a']=d.cross_up
+    d['signal_b']=d.cross_up & (d.fear<=35)
+    d['signal_c']=d.buy_signal
     return d
 
-def backtest(d,capital,allocation,fee_pct,slip_pct):
+def backtest(d,capital,allocation,fee_pct,slip_pct,signal_col="buy_signal"):
     # Decisions at completed candle close; entry at following open; stop/take checked intrabar.
     cash=float(capital);qty=0.;entry=0.;entry_ts=None;entry_cost=0.;trades=[];curve=[]
     fee=fee_pct/100; slip=slip_pct/100
@@ -108,7 +111,7 @@ def backtest(d,capital,allocation,fee_pct,slip_pct):
             else:
                 if pd.notna(bar.rsi) and (bar.rsi>=70 or ts-entry_ts>=pd.Timedelta(hours=120)):
                     pending_sell=True
-        if qty==0 and bool(bar.buy_signal):pending_buy=True
+        if qty==0 and not pending_buy and bool(bar[signal_col]):pending_buy=True
         curve.append((ts,cash+qty*float(bar.close)))
     equity=pd.Series(dict(curve),name='equity')
     t=pd.DataFrame(trades)
@@ -116,7 +119,7 @@ def backtest(d,capital,allocation,fee_pct,slip_pct):
     dd=(equity/equity.cummax()-1).min()*100 if len(equity) else 0
     return {'equity':equity,'trades':t,'final':final,'return':(final/capital-1)*100,'mdd':dd,'wins':(t['순손익']>0).mean()*100 if len(t) else np.nan}
 
-st.title('📈 Fear-RSI 퀀트 대시보드')
+st.title('📈 Fear-RSI 퀀트 대시보드 v1.1')
 st.caption('업비트 KRW 현물 · BTC/ETH · 4시간봉 RSI(14) + Crypto Fear & Greed · 투자 연구용')
 with st.sidebar:
     st.header('전략 설정')
@@ -141,7 +144,9 @@ except Exception as exc:
 # Exclude warmup from displayed performance; retain all data for indicators.
 cutoff=d.index.max()-pd.Timedelta(days=days)
 analysis=d[d.index>=cutoff].copy()
-result=backtest(analysis,capital,allocation,fee,slip)
+strategies={'A · RSI 단독':'signal_a','B · RSI + 공포':'signal_b','C · RSI + 공포 + 추세':'signal_c'}
+results={name:backtest(analysis,capital,allocation,fee,slip,col) for name,col in strategies.items()}
+result=results['C · RSI + 공포 + 추세']
 latest=d.iloc[-1]
 latest_signal='매수 후보' if bool(latest.buy_signal) else '관망 (조건 미충족)'
 cols=st.columns(5)
@@ -153,7 +158,7 @@ cols[4].metric('최대 낙폭 MDD',f'{result["mdd"]:.2f}%')
 st.info(f'**현재 판정: {latest_signal}** · 마지막 확정봉 시작(한국시간): {d.index[-1].tz_convert(KST):%Y-%m-%d %H:%M} · 조건: 전일 공포≤35, RSI 30 상향 돌파, 200일선 위')
 st.warning('실시간 주문 신호가 아닙니다. 업비트 캔들/지수 갱신 지연이 있을 수 있습니다. 4시간봉 확정 후 다음 봉 시가 진입을 가정합니다.')
 
-st.subheader('가격 · 매수 신호 · RSI')
+st.subheader('가격 · 전략 C 매수 신호 · RSI')
 view=analysis.tail(300)
 fig=make_subplots(rows=2,cols=1,shared_xaxes=True,row_heights=[.7,.3],vertical_spacing=.05)
 fig.add_trace(go.Candlestick(x=view.index,open=view.open,high=view.high,low=view.low,close=view.close,name='4H 가격'),row=1,col=1)
@@ -169,14 +174,30 @@ st.subheader('공포탐욕지수 (전일 확정값 사용)')
 fchart=analysis[['fear']].dropna().iloc[::6]
 st.line_chart(fchart)
 
-st.subheader('백테스트 성과')
+st.subheader('📊 전략 A/B/C 비교')
+summary=[]
+for name,res in results.items():
+    trades=res['trades']
+    summary.append({'전략':name,'완료 거래':len(trades),'승률 (%)':round(res['wins'],2) if len(trades) else None,'수익률 (%)':round(res['return'],2),'MDD (%)':round(res['mdd'],2),'최종 평가액 (원)':round(res['final'])})
+st.dataframe(pd.DataFrame(summary),hide_index=True,use_container_width=True)
+comparison=pd.DataFrame({name:res['equity'] for name,res in results.items()})
+st.line_chart(comparison)
+st.caption('모든 전략은 동일한 자본·거래비용·손절/익절 조건을 사용합니다. A: RSI 30 상향 돌파 / B: A + 전일 공포≤35 / C: B + 200일 이동평균선 위. 거래가 적으면 성과 비교가 불안정합니다.')
+st.subheader('🔎 최신 봉 신호 조건 진단')
+checks={'RSI 30 상향 돌파':bool(latest.cross_up),'전일 공포탐욕 ≤35':bool(pd.notna(latest.fear) and latest.fear<=35),'200일 이동평균선 위':bool(latest.trend_ok)}
+for label,passed in checks.items():
+    st.write(('✅' if passed else '❌')+' '+label)
+st.caption('진단은 가장 최근 확정 4시간봉에 대한 것이며, 매수 권유가 아닙니다.')
+st.subheader('백테스트 성과 · 전략 C')
 c1,c2,c3,c4=st.columns(4)
 t=result['trades'];c1.metric('완료 거래',f'{len(t)}회');c2.metric('승률',f'{result["wins"]:.1f}%' if len(t) else 'N/A');c3.metric('최종 평가금액',f'{result["final"]:,.0f}원');c4.metric('단순 보유 수익률',f'{(analysis.close.iloc[-1]/analysis.close.iloc[0]-1)*100:+.2f}%')
 st.line_chart(result['equity'])
+st.metric('전략 C MDD',f'{result["mdd"]:.2f}%')
 st.caption('미청산 포지션은 마지막 종가로 평가합니다. 백테스트는 시장가 슬리피지·수수료 가정을 반영하나 급변 시 실제 체결을 보장하지 않습니다.')
 if len(t):
     st.dataframe(t.sort_values('청산',ascending=False),use_container_width=True,hide_index=True)
     st.download_button('거래 기록 CSV 다운로드',t.to_csv(index=False).encode('utf-8-sig'),file_name=f'{market}_fear_rsi_trades.csv',mime='text/csv')
 else:st.info('설정한 기간에 완료된 거래가 없습니다. 전략이 적합하지 않을 수도 있으므로 신호를 억지로 만들지 마세요.')
 with st.expander('백테스트 가정 및 한계 (필독)'):
-    st.markdown('''- **매수:** 확정된 4시간봉에서 RSI 30 상향 돌파, 전일 공포탐욕 ≤35, 전일 확정 일봉 SMA200 위. 다음 4시간봉 시가 진입.\n- **매도:** -2.5% 손절 / +5% 익절 / RSI≥70 / 120시간 보유. RSI·시간 조건은 다음 봉 시가 청산.\n- **동일 봉 손절·익절 동시 충족:** 손절 우선. 갭과 슬리피지 모델은 단순화되어 있음.\n- **공포탐욕지수:** 당일 지수는 사용하지 않고 전일 UTC 일자 값만 사용. 실제 발표 시각에 따른 엄밀한 가용성은 추가 검증 필요.\n- **일봉 추세:** 전일 확정된 일봉으로 계산한 SMA200 사용.\n- **수익률:** 현금 잔액과 미청산 평가금 포함. 단순 보유와 비교하되 동일 노출 비율 비교는 아님.\n- **주의:** 과거 성과는 미래 수익을 보장하지 않음. 거래소 API 결측·서버 시각·수수료·실제 체결을 별도 검증해야 함.\n- **검증:** 초기 결과로 매개변수를 반복 최적화하지 말고 개발/검증/미사용 테스트 기간을 분리하세요.''')
+    st.markdown('''- **비교 전략:** A=RSI 상향돌파, B=A+전일 공포지수, C=B+전일 일봉 SMA200. 아래 매수 설명은 C 기준.
+- **매수:** 확정된 4시간봉에서 RSI 30 상향 돌파, 전일 공포탐욕 ≤35, 전일 확정 일봉 SMA200 위. 다음 4시간봉 시가 진입.\n- **매도:** -2.5% 손절 / +5% 익절 / RSI≥70 / 120시간 보유. RSI·시간 조건은 다음 봉 시가 청산.\n- **동일 봉 손절·익절 동시 충족:** 손절 우선. 갭과 슬리피지 모델은 단순화되어 있음.\n- **공포탐욕지수:** 당일 지수는 사용하지 않고 전일 UTC 일자 값만 사용. 실제 발표 시각에 따른 엄밀한 가용성은 추가 검증 필요.\n- **일봉 추세:** 전일 확정된 일봉으로 계산한 SMA200 사용.\n- **수익률:** 현금 잔액과 미청산 평가금 포함. 단순 보유와 비교하되 동일 노출 비율 비교는 아님.\n- **주의:** 과거 성과는 미래 수익을 보장하지 않음. 거래소 API 결측·서버 시각·수수료·실제 체결을 별도 검증해야 함.\n- **검증:** 초기 결과로 매개변수를 반복 최적화하지 말고 개발/검증/미사용 테스트 기간을 분리하세요.''')
