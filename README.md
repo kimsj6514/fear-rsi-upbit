@@ -1,16 +1,20 @@
-# Fear-RSI v1.4
+# Fear-RSI v1.5 — 진입 기회 연구형 대시보드
 
-Upbit BTC/ETH Streamlit quantitative research dashboard.
+기존 v1.4의 BTC/ETH, D1/D2/D3, MFE/MAE, 청산 비교 기능을 유지합니다.
 
-## New in v1.4
-- D1/D2/D3 strategy comparison preserved.
-- Per-trade maximum favorable excursion (MFE) and maximum adverse excursion (MAE).
-- Exit comparison: fixed profit target, trailing stop, momentum exit.
-- Download detailed trades as CSV; 70/30 chronological train/test display.
-- Existing A/B/C reference comparison retained.
+## 추가 기능
+- 매수 신호 확정봉에서 RSI, 공포탐욕, 거래량 배율, EMA 상태, 시장 국면, 휴리스틱 점수 기록
+- 다음 4시간봉 시가 진입 기준 1일/3일/7일/14일 종가 변화 및 MFE/MAE 계산
+- 70:30 시간순 개발/검증 구간 분리. 보유기간이 분할 경계를 넘는 신호는 제외
+- 신호 14일 중복 제외 선택, 구간별 거래비용 반영 평균 성과
+- 검증 점수 구간별/시장 국면별 성과와 CSV 다운로드
 
-## Deploy
-Upload `app.py`, `requirements.txt`, and `README.md` to the existing GitHub repository root. Streamlit Cloud should redeploy the existing app. No API keys or automatic orders are used.
+## 주의사항
+- 점수는 임의의 사전 가중치로 만든 설명용 점수이며 상승 확률이 아닙니다.
+- 사후 최대 상승폭(MFE)은 실제 실현 가능 수익이 아닙니다.
+- 표본이 적고 중복된 신호 및 장세 의존성이 있으므로 독립 검증이 필요합니다.
+- 봉 내부 고가/저가 순서는 알 수 없으며 API 가용 시각/결측/실제 체결은 별도 검증이 필요합니다.
+- 실거래 주문 기능이 없는 연구용 앱입니다.
 
-## Caveats
-OHLC-based backtests cannot reconstruct the intrabar order of events. Trailing stops use only prior bars' highs, and gaps are conservatively filled at worse opening prices. MFE/MAE are approximate. Strategies are hypotheses, not proven profitable. The holdout period must not be reused repeatedly for tuning. Partial take-profit was deliberately excluded pending proper split-position accounting.
+## 배포
+GitHub 저장소 루트에 `app.py`, `requirements.txt`, `README.md`를 교체 업로드합니다. Streamlit은 변경을 감지해 재배포합니다.

@@ -5,9 +5,9 @@ import requests
 import streamlit as st
 import plotly.graph_objects as go
 
-st.set_page_config(page_title='Fear-RSI v1.4 | 통합형 퀀트', page_icon='📈', layout='wide')
-st.title('📈 Fear-RSI 퀀트 대시보드 v1.4')
-st.caption('업비트 BTC·ETH | D1 단기·D2 스윙·D3 추세 | MFE·MAE 및 청산 방식 비교 | 연구용, 자동 주문 없음')
+st.set_page_config(page_title='Fear-RSI v1.5 | 통합형 퀀트', page_icon='📈', layout='wide')
+st.title('📈 Fear-RSI 퀀트 대시보드 v1.5')
+st.caption('업비트 BTC·ETH | D1 단기·D2 스윙·D3 추세 | MFE·MAE · 진입 신호 선행 성과 분석 | 연구용, 자동 주문 없음')
 CONFIG = {
     'D1 · 단기 반등': {'signal':'D1','stop':2.5,'take':4.5,'hours':24,'trail':2.0},
     'D2 · 스윙': {'signal':'D2','stop':6.0,'take':12.0,'hours':336,'trail':5.0},
@@ -17,7 +17,7 @@ KST='Asia/Seoul'
 
 @st.cache_data(ttl=900,show_spinner=False)
 def get_candles(market,days):
-    session=requests.Session();session.headers['User-Agent']='FearRSIResearch/1.4'
+    session=requests.Session();session.headers['User-Agent']='FearRSIResearch/1.5'
     target=int((days+235)*6);rows=[];cursor=None
     while len(rows)<target:
         params={'market':market,'count':min(200,target-len(rows))}
@@ -265,3 +265,120 @@ with st.expander('백테스트 한계 및 주의'):
 - **비교**: 검증 구간의 성과를 보고 방식이나 배율을 선택하면 검증 데이터가 사실상 개발 데이터로 바뀝니다. 별도 미사용 구간 또는 워크포워드 재검증이 필요합니다.
 - **수수료·슬리피지**: 편도 고정 비율 가정. API 누락, 캔들 시간 경계, 실제 주문 체결은 별도 검증되지 않았습니다.
 - **자동 매매 없음**. 수익 보장이나 투자 권유가 아닙니다.''')
+
+
+# v1.5: Event study using only features available at the signal close.
+# Future returns are labels for historical evaluation, NEVER input features for scoring.
+HORIZONS = {'1일':6, '3일':18, '7일':42, '14일':84}
+
+def entry_opportunity_score(frame):
+    # Predeclared, interpretable hypothesis, not optimized on holdout data.
+    # Score is intentionally not a probability or a forecast of return.
+    x=frame
+    score=pd.Series(0.0,index=x.index)
+    score+=np.select([x.rsi.between(30,42),x.rsi.between(42,52),x.rsi.between(20,30)],[25,17,12],default=0)
+    score+=np.select([x.vol_ratio>=1.5,x.vol_ratio>=1.1,x.vol_ratio>=.8],[20,14,7],default=0)
+    score+=np.select([x.fear<=20,x.fear<=35,x.fear<=55],[20,15,7],default=0)
+    score+=np.where(x.close>x.ema20,15,0)
+    score+=np.where(x.ema20>x.ema50,10,0)
+    score+=np.where(x.regime.isin(['강한 상승','횡보/전환']),10,0)
+    return score.clip(0,100)
+
+def build_entry_study(frame, strategy, train_end, test_start, cooldown_bars=0):
+    # The signal is known at candle close i; buy at candle i+1 open.
+    # Exclude signals whose complete horizon is not contained in its partition.
+    rows=[];last_idx=-10**9
+    idx=np.flatnonzero(frame[strategy].fillna(False).to_numpy(dtype=bool))
+    for i in idx:
+        if i-last_idx<=cooldown_bars:continue
+        if i+1+max(HORIZONS.values())>=len(frame):continue
+        entry_time=frame.index[i+1]
+        end_time=frame.index[i+1+max(HORIZONS.values())]
+        if entry_time<=train_end and end_time<=train_end:segment='개발'
+        elif entry_time>=test_start and end_time<=frame.index[-1]:segment='검증'
+        else:continue
+        entry=float(frame.open.iloc[i+1])
+        if not np.isfinite(entry) or entry<=0:continue
+        feat=frame.iloc[i]
+        r={'구간':segment,'신호시각':frame.index[i], '진입시각':entry_time,
+           '진입가':entry,'RSI':float(feat.rsi),'공포':float(feat.fear) if pd.notna(feat.fear) else np.nan,
+           '거래량배율':float(feat.vol_ratio),'EMA20상회':bool(feat.close>feat.ema20),
+           '국면':str(feat.regime),'점수':float(feat.opportunity_score)}
+        for label,bars in HORIZONS.items():
+            last=i+1+bars
+            r[f'{label} 종가수익률(%)']=100*(float(frame.close.iloc[last])/entry-1)
+            # Exclude entry bar intrabar highs/lows: order within entry bar is unknown.
+            sub=frame.iloc[i+2:last+1]
+            r[f'{label} MFE(%)']=100*(float(sub.high.max())/entry-1) if len(sub) else np.nan
+            r[f'{label} MAE(%)']=100*(float(sub.low.min())/entry-1) if len(sub) else np.nan
+        rows.append(r);last_idx=i
+    return pd.DataFrame(rows)
+
+def study_summary(events, fee_pct, slip_pct):
+    rows=[]
+    for label in HORIZONS:
+        col=f'{label} 종가수익률(%)'
+        # Entry slip and fee, exit slip and fee. Fee/slip approximate two-sided drag.
+        gross=events[col].dropna()
+        net=(1+gross/100)*((1-slip_pct/100)*(1-fee_pct/100))/((1+slip_pct/100)*(1+fee_pct/100))-1
+        net*=100
+        rows.append({'보유 기간':label,'표본':len(net), '평균 순수익률(%)':net.mean() if len(net) else np.nan,
+                     '중앙값(%)':net.median() if len(net) else np.nan,
+                     '수익 확률(%)':100*(net>0).mean() if len(net) else np.nan,
+                     '평균 MFE(%)':events[f'{label} MFE(%)'].mean() if len(net) else np.nan,
+                     '평균 MAE(%)':events[f'{label} MAE(%)'].mean() if len(net) else np.nan})
+    return pd.DataFrame(rows)
+
+st.subheader('🧪 v1.5 · 매수 시점별 미래 성과 연구')
+st.caption('진입 시점에 이미 알려진 RSI·거래량·공포·추세·시장 국면을 기록하고, 그 이후 1·3·7·14일 성과를 평가합니다. 미래 성과는 점수 계산에 사용하지 않습니다.')
+research_strategy=st.selectbox('진입 신호 연구 대상',list(CONFIG),index=1,key='v15_strategy')
+nonoverlap=st.checkbox('14일 이내 중복 신호 제외 (표본 독립성 보조)',value=True)
+research_frame=a.copy()
+research_frame['opportunity_score']=entry_opportunity_score(research_frame)
+# Use full indicator warmup, but enforce horizon completion entirely inside each segment.
+research=build_entry_study(research_frame,CONFIG[research_strategy]['signal'],train.index[-1],test.index[0],84 if nonoverlap else 0)
+if research.empty:
+    st.info('이 설정에서 14일 미래 가격까지 확보된 진입 신호가 없습니다. 분석 기간을 늘리거나 중복 제외를 해제해 보세요.')
+else:
+    for segment in ['개발','검증']:
+        sample=research[research['구간']==segment].copy()
+        st.markdown(f'**{segment} 구간 · 완전 관측된 신호 {len(sample)}개**')
+        if sample.empty:
+            st.info('이 구간은 완전한 14일 관측값이 없습니다.')
+            continue
+        st.dataframe(study_summary(sample,fee,slip).round(2),hide_index=True,use_container_width=True)
+        if len(sample)<20:
+            st.warning(f'{segment} 표본이 {len(sample)}개뿐이어서 평균이나 승률이 불안정합니다. 이 수치로 매수 규칙을 확정하면 안 됩니다.')
+        if segment=='검증':
+            sample['점수 구간']=pd.cut(sample['점수'],bins=[-1,39,59,79,100],labels=['0~39','40~59','60~79','80~100'])
+            score_tbl=sample.groupby('점수 구간',observed=True).agg(
+                표본=('점수','size'),평균점수=('점수','mean'),
+                **{'7일 평균수익(%)':('7일 종가수익률(%)','mean'),
+                   '7일 상승비율(%)':('7일 종가수익률(%)',lambda s:100*(s>0).mean()),
+                   '14일 평균수익(%)':('14일 종가수익률(%)','mean')}).reset_index()
+            st.markdown('**검증 구간 · 진입 점수별 결과 (종가 변화, 거래비용 차감 전)**')
+            st.dataframe(score_tbl.round(2),hide_index=True,use_container_width=True)
+            if len(sample)>=5:
+                plot=go.Figure()
+                plot.add_trace(go.Scatter(x=sample['점수'],y=sample['7일 종가수익률(%)'],mode='markers',
+                                          text=sample['국면'],name='7일 수익률'))
+                plot.update_layout(height=300,xaxis_title='진입 당시 점수 (0~100)',yaxis_title='7일 가격 변화 (%)',
+                                   margin=dict(l=10,r=10,t=20,b=30))
+                st.plotly_chart(plot,use_container_width=True)
+            st.markdown('**검증 구간 · 국면별 7일 성과**')
+            by_reg=sample.groupby('국면',as_index=False).agg(표본=('국면','size'),
+                평균7일변화=('7일 종가수익률(%)','mean'),상승비율=('7일 종가수익률(%)',lambda s:100*(s>0).mean()))
+            st.dataframe(by_reg.round(2),hide_index=True,use_container_width=True)
+    st.markdown('**진입 당시 조건 및 사후 성과 상세 기록**')
+    show=research.copy()
+    for c in ['신호시각','진입시각']:
+        show[c]=show[c].dt.tz_convert(KST).dt.strftime('%Y-%m-%d %H:%M')
+    st.dataframe(show.round(2),hide_index=True,use_container_width=True)
+    st.download_button('v1.5 진입 신호 연구 CSV 다운로드',show.to_csv(index=False).encode('utf-8-sig'),
+                       file_name=f'{market}_{CONFIG[research_strategy]["signal"]}_v1_5_entry_study.csv',mime='text/csv')
+
+st.subheader('🔎 현재 진입 기회 점수 · 설명용')
+now_score=float(research_frame.opportunity_score.iloc[-1])
+st.metric('현재 확정봉 기준 점수',f'{now_score:.0f}/100')
+st.caption('점수는 사전에 정한 휴리스틱이며 미래 상승 확률이나 예상 수익률이 아닙니다. 점수가 높아도 진입 신호가 없으면 거래 후보가 아닙니다.')
+st.caption('주의: 공포탐욕지수의 실제 게시 시각, 업비트 캔들 결측, 거래소 체결 지연은 별도 검증이 필요합니다. 동일 신호가 여러 보유기간에서 중복되므로 각 기간 성과는 독립적인 표본이 아닙니다. 검증 결과를 보고 가중치를 바꾸면 새 검증 데이터가 필요합니다.')
