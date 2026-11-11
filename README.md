@@ -1,27 +1,27 @@
-# Fear-RSI v2.1 — 심플 매수·매도 신호 + 텔레그램
+# Fear-RSI v2.3 — 4종목 심플 신호 + 텔레그램
 
-- 업비트 1시간 / 4시간 / 1일 **확정봉** RSI(14)
-- 공포탐욕지수(Alternative.me, 일간)
-- 매수 후보: 공포 ≤35, RSI ≤40, 직전 RSI보다 상승
-- 매도 후보: 탐욕 ≥65, RSI ≥60, 직전 RSI보다 하락
-- **강한 매수/매도**: 1시간봉과 4시간봉에서 같은 방향의 신호가 동시에 나올 때. 1일봉까지 일치하면 표시
-- 자동 주문 없음. 예측이나 수익 보장 아님.
+BTC, ETH, XRP, DOGE의 업비트 원화마켓을 1시간·4시간·일봉 **확정봉** 기준으로 분석합니다. 자동매매는 하지 않습니다.
 
-## 배포
+## 기존 신호 조건 (변경 없음)
+- 매수: 공포탐욕 ≤35, RSI(14) ≤40, RSI가 직전 확정봉보다 상승
+- 매도: 공포탐욕 ≥65, RSI(14) ≥60, RSI가 직전 확정봉보다 하락
+- 강한 신호: 1시간봉과 4시간봉 같은 방향 동시 충족. 상반된 방향이면 `신호 엇갈림`.
 
-기존 GitHub 리포지토리 `main`에 ZIP 안의 모든 파일과 `.github/workflows/telegram-alert.yml`을 같은 구조로 업로드하세요. 기존 Streamlit 주소는 그대로입니다. `app.py`만 올리면 알림은 작동하지 않습니다.
+## 추가 기능 5가지
+1. 최근 **30개 확정 일봉** 최고가(고가) 대비 최신 1시간 확정봉 종가의 하락률 표시.
+2. `alert_state.json`으로 중복 알림 방지. 새로운 신호/신호 등급 변경/해제 후 재발생 시 알림.
+3. 최근 2개 확정 일봉 종가 비교로 일봉 방향(상승/하락/보합) 표시. 신호 조건에는 영향을 주지 않음.
+4. 텔레그램 메시지와 대시보드에 업비트 종목 차트 링크.
+5. **새 알림 전송 성공 시** `signal_history.csv`에 발생 시각, 당시 참고 가격(1시간 확정봉 종가), 신호, RSI, 공포탐욕, 하락률을 기록. 실제 매수가/체결가가 아님.
 
-## 텔레그램 설정
+## 설치
 
-1. 텔레그램에서 `@BotFather`를 열고 `/newbot`으로 봇을 만듭니다. 발급받은 **토큰은 공개하거나 코드에 붙여 넣지 마세요.**
-2. 만든 봇과 대화를 열어 `/start`를 보냅니다.
-3. 브라우저에서 `https://api.telegram.org/bot<토큰>/getUpdates`를 열어 `message.chat.id` 값을 확인합니다. (주소에 들어간 토큰은 타인과 공유하지 마세요.)
-4. GitHub 리포지토리 → **Settings → Secrets and variables → Actions → New repository secret** 에 다음 두 개를 등록합니다.
-   - `TELEGRAM_BOT_TOKEN` : 봇 토큰
-   - `TELEGRAM_CHAT_ID` : 숫자 chat ID
-5. GitHub → **Actions → Fear-RSI Telegram alerts → Run workflow** 로 첫 실행을 시험합니다. 첫 실행에서 매수·매도 후보가 없으면 알림은 오지 않습니다.
-6. 이후 매시간 12분(UTC 기준)에 자동 점검합니다. GitHub Actions 스케줄은 지연되거나 실행이 누락될 수 있어 정확한 시각 보장은 없습니다.
+ZIP 내부의 `app.py`, `signals.py`, `notify.py`, `requirements.txt`, `README.md`를 기존 GitHub 저장소 `main` 루트에 교체하고, `.github/workflows/telegram-alert.yml`도 같은 경로에 교체하세요. 기존 Streamlit 주소와 Telegram Secrets(`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`)는 그대로 사용합니다.
 
-**중복 알림:** 매수/매도 후보가 새로 나타나거나 '매수 후보'→'강한 매수 신호'처럼 단계가 바뀔 때만 알립니다. 신호가 사라졌다 다시 나타나면 재알림합니다. 상태는 `alert_state.json`에 기록됩니다. 매시간 전체 종목 4개를 확인합니다.
+GitHub Actions → **Fear-RSI Telegram alerts** → **Run workflow**로 실행 확인. 신호가 새로 발생하지 않으면 알림이 오지 않는 것이 정상입니다. 작업 실행 결과는 Actions 로그에서 확인합니다.
 
-**주의:** GitHub Actions의 워크플로 파일은 `.github/workflows/` 경로에 정확히 넣어야 합니다. GitHub 설정에서 Actions의 **Workflow permissions → Read and write permissions**가 필요할 수 있습니다. 장기간 활동이 없는 공개 저장소의 예약 작업은 자동 비활성화될 수 있습니다. 무료 사용 한도와 실행 정책을 확인하세요.
+기존 `alert_state.json`은 **삭제하거나 덮어쓰지 마세요**. 기존 알림 중복 방지 상태를 이어받습니다. `signal_history.csv`는 자동 생성됩니다. 공개 저장소에 저장하면 신호 기록도 공개되므로 비공개 기록이 필요하면 저장 방식 변경이 필요합니다.
+
+예약 실행은 UTC 매시 12분이며 GitHub Actions 정책상 지연/누락될 수 있습니다. GitHub Actions → Settings → Actions → General → Workflow permissions에 쓰기 권한이 필요할 수 있습니다.
+
+**주의:** 30일 고점 대비 하락률은 가격이 저렴한지에 대한 참고치일 뿐, 저점·반등·수익을 보장하지 않습니다. Alternative.me 공포탐욕은 시장 전체 일간 지표입니다.
