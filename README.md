@@ -1,16 +1,16 @@
-# Fear-RSI v1.3 통합형
+# Fear-RSI v1.4
 
-업비트 KRW-BTC / KRW-ETH 4시간봉과 전일 Crypto Fear & Greed 지수를 이용하는 연구용 Streamlit 대시보드.
+Upbit BTC/ETH Streamlit quantitative research dashboard.
 
-- D1: 단기 반등 (최대 24시간)
-- D2: 스윙 (최대 14일)
-- D3: 추세 전환 (최대 8주)
-- 시장 국면: 강한 상승 / 상승 후 조정 / 횡보·전환 / 하락 속 소강 / 강한 하락
-- 시간순 70:30 개발/검증, 검증 거래 평균 수익·승률·MDD·노출·국면별 손익·청산사유·CSV
-- A/B/C 이전 기준 전략 비교 유지
+## New in v1.4
+- D1/D2/D3 strategy comparison preserved.
+- Per-trade maximum favorable excursion (MFE) and maximum adverse excursion (MAE).
+- Exit comparison: fixed profit target, trailing stop, momentum exit.
+- Download detailed trades as CSV; 70/30 chronological train/test display.
+- Existing A/B/C reference comparison retained.
 
-## 실행
-`pip install -r requirements.txt` 후 `streamlit run app.py`.
+## Deploy
+Upload `app.py`, `requirements.txt`, and `README.md` to the existing GitHub repository root. Streamlit Cloud should redeploy the existing app. No API keys or automatic orders are used.
 
-## 주의
-전략 파라미터는 실험적 가설이며 수익성이 검증되지 않았습니다. 거래량·캔들 누락, 공포탐욕지수 발표 시각, 실거래 체결은 별도 검증이 필요합니다. 자동 주문 기능 없음.
+## Caveats
+OHLC-based backtests cannot reconstruct the intrabar order of events. Trailing stops use only prior bars' highs, and gaps are conservatively filled at worse opening prices. MFE/MAE are approximate. Strategies are hypotheses, not proven profitable. The holdout period must not be reused repeatedly for tuning. Partial take-profit was deliberately excluded pending proper split-position accounting.
