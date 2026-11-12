@@ -1,2 +1,5 @@
 ﻿detected_at_kst,market,signal,price_krw,fear,rsi_1h,rsi_4h,rsi_1d,drop_from_30d_high_pct,daily_trend,upbit_url
 2026-11-12 12:46:57,KRW-DOGE,매수 후보,91.4,28,39.9,35.4,27.6,-21.21,하락,https://upbit.com/exchange?code=CRIX.UPBIT.KRW-DOGE
+2026-11-13 05:46:02,KRW-ETH,강한 매수 신호,2734000.0,28,37.4,30.0,29.2,-20.34,하락,https://upbit.com/exchange?code=CRIX.UPBIT.KRW-ETH
+2026-11-13 05:46:03,KRW-XRP,강한 매수 신호,1398.0,28,39.8,30.1,22.2,-25.04,하락,https://upbit.com/exchange?code=CRIX.UPBIT.KRW-XRP
+2026-11-13 05:46:04,KRW-DOGE,매수 후보,89.5,28,39.4,31.7,27.6,-22.84,하락,https://upbit.com/exchange?code=CRIX.UPBIT.KRW-DOGE
